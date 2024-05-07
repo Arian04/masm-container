@@ -5,7 +5,7 @@
 MINGW=/usr/i686-w64-mingw32
 EXTRA_LIB_NAME="Irvine32"
 
-build() {
+assemble() {
 	uasm -nologo -c -Fl=listing_file.lst -Zd -Zi -elf \
 		-I "$EXTRA_LIB_PATH" -I $MINGW/include \
 		"$INPUT_ASM_FILE_PATH"
@@ -34,16 +34,40 @@ link() {
 		-o "${ASM_BASENAME}.exe"
 }
 
+build() {
+	assemble
+	link
+}
+
+buildrun() {
+	build
+	wine "./${ASM_BASENAME}.exe"
+}
+
 main() {
-	INPUT_ASM_FILE_PATH="${1:?}"
+	ACTION="${1:?}"
+	INPUT_ASM_FILE_PATH="${2:?}"
+
+	# turn ACTION into lowercase
+	ACTION="$(echo "$ACTION" | tr '[:upper:]' '[:lower:]')"
+
+	# Turn possibly relative path into absolute path
 	INPUT_ASM_FILE_PATH="$(readlink -f "$INPUT_ASM_FILE_PATH")"
+
+	# Get basename for later
 	ASM_BASENAME="$(basename -s .asm "$INPUT_ASM_FILE_PATH")"
 
 	mkdir -p build
 	cd build || return
 
-	build
-	link
+	if [[ "$ACTION" == "build" ]]; then
+		build
+	elif [[ "$ACTION" == "buildrun" ]]; then
+		buildrun
+	else
+		echo "Invalid subcommand: $ACTION"
+		return 1
+	fi
 }
 
 main "$@"

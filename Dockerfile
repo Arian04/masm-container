@@ -5,6 +5,7 @@ ARG IMAGE=debian
 ARG IMAGE_TAG=12
 
 # constants
+ARG BUILD_SCRIPT_NAME=build.sh
 ARG BUILD_DIR=/build
 ARG DEST_DIR=/out
 ARG EXTRA_LIB_PATH=/irvine-lib
@@ -65,12 +66,13 @@ RUN x86_64-w64-mingw32-gcc -nostdlib -static ${FAKE_WINE_MENUBUILDER_NAME}.c -o 
 ##### Program Builder/Runner #####
 FROM ${IMAGE}:${IMAGE_TAG} as runtime_base
 
-# constants
+# constants (constants declared as ENV are meant to be passed to child container)
+ARG BUILD_SCRIPT_NAME
 ARG BUILD_DIR
 ARG DEST_DIR
 ARG EXTRA_LIB_PATH
 ARG FAKE_WINE_MENUBUILDER_NAME
-ARG USERNAME=wineuser
+ENV USERNAME=wineuser
 
 # env vars that the script reads in
 ENV EXTRA_LIB_PATH=${EXTRA_LIB_PATH}
@@ -113,28 +115,37 @@ ENV WINEARCH='win64'
 RUN wineboot --init && \
 	wineserver --wait
 
-# Copy over required files
+# Copy over downloaded library files
 COPY --chown=${USERNAME}:${USERNAME} --from=library_downloader ${EXTRA_LIB_PATH} ${EXTRA_LIB_PATH}
 
 # Copy over binary that just returns 0 to suppress the winemenubuilder error
 COPY --from=fake-winemenubuilder /${FAKE_WINE_MENUBUILDER_NAME}.exe ${WINEPREFIX}/drive_c/windows/system32/winemenubuilder.exe
 
-# Copy over UASM
+# Copy over UASM binary
 COPY --from=uasm_builder --chmod=555 /uasm /usr/bin
 
-COPY --chmod=555 ./build.sh /usr/bin
+# Copy over build script
+COPY --chmod=555 ./${BUILD_SCRIPT_NAME} /usr/bin
 
-COPY --chown=${USERNAME}:${USERNAME} ./test-asm-files/*.asm ${BUILD_DIR}
-
-WORKDIR ${DEST_DIR}
-VOLUME ${DEST_DIR}
-
-# suppress errors during actual usage
+# suppress wine errors
+# only reason I didn't do this earlier in the Dockerfile is so I can get more verbose output while debugging
 ENV WINEDEBUG='-all'
-
-CMD [ "/usr/bin/build.sh", "/build/6th-main.asm" ]
 
 ##### User-facing Builder/Runner #####
 FROM runtime_base as runtime
 
-# TODO
+# constants
+ARG BUILD_SCRIPT_NAME
+ARG BUILD_DIR
+ARG DEST_DIR
+
+# source code directory
+VOLUME ${BUILD_DIR}
+
+# build outputs will be in CWD, so move to the desired destination directory
+WORKDIR ${DEST_DIR}
+VOLUME ${DEST_DIR}
+
+# set my script as entrypoint so that it's called when CMD is overrideden with "ACTION ASM_FILE_PATH"
+# NOTE: BUILD_SCRIPT_NAME is hardcoded, because I couldn't find a good way to use the ARG inside ENTRYPOINT
+ENTRYPOINT [ "/usr/bin/build.sh" ]
